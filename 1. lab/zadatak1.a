@@ -1,0 +1,76 @@
+                ORG 0
+UCITAJ          MOV R0, #0x500                  ;pocetna adresa niza podataka
+                MOV R1, #0x1000                 ;pocetna adresa za upis podataka
+                LDR R2, PROVJERA                ;kljuc za provjeru kraja ucitavanja
+                LDR R3, KLJUC                   ;podatak s kojim treba zakljuciti upis
+                MOV SP, #0x10000                ;inicijalizacija stoga
+
+PETLJA          LDR R4, [R0], #4                ;ucitavanje broja racunske operacije i pomicanje adrese
+                CMP R4, R2
+                BEQ KRAJ                        ;ako je ucitani podatak jednak 0x80808080, doslo je do kraja niza
+
+                LDR R5, [R0], #4                ;ucitaj prvi operand
+                LDR R6, [R0], #4                ;ucitaj drugi operand
+
+                CMP R4, #1                      ;prva usporedba
+                ADDMI R7, R5, R6                ;ako je usporedba postavila zastavicu N = 1, u R4 je pohranjena 0 te treba obaviti zbrajanje
+                BMI POHRANA                     ;ako je obavljeno zbrajanje, nema potrebe za ostalim provjerama, treba samo zapisati broj u memoriju
+
+                SUBEQ R7, R5, R6                ;ako je usporedba postavila zastavicu Z = 1, u R4 je pohranjena 1 te treba obaviti oduzimanje
+                BEQ POHRANA                     ;ako je obavljeno oduzimanje, nema potrebe za ostalim provjerama, treba samo zapisati broj u memoriju
+
+                CMP R4, #2                      ;druga usporedba
+                MULEQ R7, R5, R6                ;ako je usporedba postavila zastavicu Z = 1, u R4 je pohranjena 2 te treba obaviti mnozenje
+                BEQ POHRANA                     ;ako je obavljeno mnozenje, nema potrebe za preostalom provjerom, treba samo zapisati broj u memoriju
+
+                CMP R4, #3                      ;treca usporedba
+                STMEQFD SP!, {R5, R6}           ;ako je usporedba postavila zastavicu Z = 1, u R4 je pohranjena 3 te treba obaviti dijeljenje - pohrana parametara
+                BLEQ DIJELI                     ;poziv potprograma za dijeljenje 
+           
+                LDMFD SP!, {R7}                 ;pohrana rezultata dijeljenja sa stoga
+                ADD SP, SP, #8                  ;ciscenje stoga
+
+POHRANA         STR R7, [R1], #4                ;pohrana rezultata na ispravnu adresu i pomicanje adrese
+
+                B PETLJA                        ;ucitavanje sljedecih podataka             
+
+KRAJ            STR R3, [R1]                    ;zakljucavanje upisa podataka
+                SWI 0x123456                    ;zavrsetak izvodenja programa
+
+DIJELI          SUB SP, SP, #4                  ;alociranje prostor za rezultat
+                STMFD SP!, {R0,R1,R2,R3}        ;spremanje konteksta
+                LDR R0, [SP, #20]               ;ucitavanje prvog operanda sa stoga
+                LDR R1, [SP, #24]               ;ucitavanje drugog operanda sa stoga
+                MOV R2, #0                      ;inicijaliziranje rezultata na 0
+                MOV R3, #1                      ;registar za provjeru predznaka
+
+                CMP R1, #0                      ;ako se dijeli s 0, vratiti 0 (otici na kraj potprograma)
+                BEQ ZAVRSI
+
+PREDZNAK        CMP R0, #0                      ;ako je prvi operand manji od 0, izracunaj apsolutnu vrijednost te spremi podatak o predznaku u R3
+                RSBMI R0, R0, #0
+                MVNMI R3, R3
+
+                CMP R1, #0                      ;ako je drugi operand manji od 0, izracunaj apsolutnu vrijednost te spremi podatak o predznaku u R3
+                RSBMI R1, R1, #0
+                MVNMI R3, R3
+
+
+PODIJELI        SUBS R0, R0, R1                 ;oduzmi brojeve te ako je rezultat oduzimanja veci ili jednak 0, povecaj rezultat za 1              
+                ADDGE R2, R2, #1
+                
+                BGE PODIJELI                    ;ponovno dijeljenje ako je prethodni rezultat oduzimanja veci ili jednak 0
+
+ZAVRSI          CMP R3, #0                      ;ako je podatak o predznaku manji od 0, treba promijeniti predznak rezultata
+                MVNMI R2, R2
+                ADDMI R2, R2, #1
+                STR R2, [SP, #16]               ;pohrani rezultat na stog
+
+                LDMFD SP!, {R0,R1,R2,R3}        ;obnovi kontekst
+                MOV PC, LR                      ;vrati se na mjesto poziva potprograma         
+
+PROVJERA        DW 0x80808080
+KLJUC           DW 0xFFFFFFFF
+
+                ORG 0x500
+                DW 00000003, 0xFFFFFEFF, 0x00000010, 00000001, 0x000001F4, 0xFFFFFD44, 00000002, 0xFFFFFFFE, 0x0000000A, 00000003, 0xFFFFF000, 0xFFFFFFC0, 0x80808080
