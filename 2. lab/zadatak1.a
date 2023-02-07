@@ -1,0 +1,101 @@
+                ORG 0
+                B GLAVNI                        ;obrada iznimke RESET        
+
+                ORG 0x18                        ;obrada iznimke IRQ
+PREKID          STMFD SP!, {R0, R1, R2, R3, LR} ;pohrana konteksta
+                LDR R0, STANJE                  ;ucitavanje trenutnog stanja
+
+IZ_1_U_2        CMP R0, #1                      ;ako je trenutno stanje 1
+                MOVEQ R1, #2                    ;sljedece stanje je 2
+                BLEQ C_Z                        ;pozivanje potprograma C_Z
+                BEQ VAN                         ;preskok sljedecih provjera
+                
+IZ_2_U_3        CMP R0, #2                      ;ako je trenutno stanje 2
+                MOVEQ R1, #3                    ;sljedece stanje je 3
+                BLEQ ZELENO                     ;pozivanje potprograma ZELENO
+                BEQ VAN                         ;preskok sljedecih provjera
+
+IZ_3_U_4        CMP R0, #3                      ;ako je trenutno stanje 3
+                MOVEQ R1, #4                    ;sljedece stanje je 4
+                BLEQ ZUTO                       ;pozivanje potprograma ZUTO
+                BEQ VAN                         ;preskok sljedecih provjera
+
+IZ_4_U_1        CMP R0, #4                      ;ako je trenutno stanje 4
+                MOVEQ R1, #1                    ;sljedece stanje je 1
+                BLEQ CRVENO                     ;pozivanje potprograma CRVENO
+                BEQ VAN                         ;preskok sljedecih provjera
+
+VAN             STR R1, STANJE                  ;pohrana novog stanja
+                LDR R0, RTC                     ;ucitavanje adrese RTC sklopa
+                MOV R1, #0
+                STR R1, [R0, #8]                ;prihvacanje prekida
+                STR R1, [R0, #12]               ;reinicijalizacija LR RTC-a
+
+                LDMFD SP!, {R0, R1, R2, R3, LR} ;obnova konteksta
+                SUBS PC, LR, #4                 ;povratak iz obradivanja prekida
+
+CRVENO          STMFD SP!, {R0, R1}             ;pohrana konteksta
+                LDR R0, GPIO                    ;ucitavanje adrese GPIO sklopa
+                MOV R1, #0b00100000             ;paljenje crvenog svjetla
+                STR R1, [R0, #0]                ;slanje na GPIO port A
+                LDMFD SP!, {R0, R1}             ;obnova konteksta
+                MOV PC, LR                      ;povratak iz potprograma
+
+C_Z             STMFD SP!, {R0, R1}             ;pohrana konteksta
+                LDR R0, GPIO                    ;ucitavanje adrese GPIO sklopa
+                MOV R1, #0b01100000             ;paljenje crvenog svjetla i zutog svjetla
+                STR R1, [R0, #0]                ;slanje na GPIO port A
+                LDMFD SP!, {R0, R1}             ;obnova konteksta
+                MOV PC, LR                      ;povratak iz potprograma
+
+ZELENO          STMFD SP!, {R0, R1}             ;pohrana konteksta
+                LDR R0, GPIO                    ;ucitavanje adrese GPIO sklopa
+                MOV R1, #0b10000000             ;paljenje zelenog svjetla
+                STR R1, [R0, #0]                ;slanje na GPIO port A
+                LDMFD SP!, {R0, R1}             ;obnova konteksta
+                MOV PC, LR                      ;povratak iz potprograma
+
+ZUTO            STMFD SP!, {R0, R1}             ;pohrana konteksta
+                LDR R0, GPIO                    ;ucitavanje adrese GPIO sklopa
+                MOV R1, #0b01000000             ;paljenje zutog svjetla
+                STR R1, [R0, #0]                ;slanje na GPIO port A
+                LDMFD SP!, {R0, R1}             ;obnova konteksta
+                MOV PC, LR                      ;povratak iz potprograma
+
+GLAVNI          MSR CPSR, #0b11010010           ;prelazak u nacin rada IRQ
+                MOV SP, #0x10000                ;inicijalizacija R13_irq
+
+                MSR CPSR, #0b11010011           ;prelazak u nacin rada SVC
+                MOV SP, #0xFC00                 ;inicijalizacija R13_svc
+
+UI_INIT         LDR R0, GPIO                    ;ucitavanje adrese GPIO sklopa
+                MOV R1, #0b11100000             ;bitovi 7,6,5 izlazni, ostale ne koristimo
+                STR R1, [R0, #8]                ;slanje smjera
+
+                MOV R0, #1                      ;pocetno stanje semafora
+                STR R0, STANJE                  ;pohrana pocetnog stanja
+
+                BL CRVENO                       ;poziv potprograma za postavljanje crvenog svjetla
+
+                LDR R1, RTC                     ;ucitavanje adrese RTC sklopa
+                LDR R2, KONST                   ;ucitavanje konstante cekanja
+                STR R2, [R1, #4]                ;pohrana konstante u MR RTC-a
+
+                MOV R2, #0
+                STR R2, [R1, #12]               ;inicijalizacija LR RTC-a na 0
+
+                MOV R2, #1                      ;omogucavanje slanja prekida RTC-a
+                STR R2, [R1, #16]               ;pohrana omogucenih prekida u CR RTC-a
+
+                MRS R0, CPSR
+                BIC R0, R0, #0x80               ;omogucavanje prekida IRQ
+                MSR CPSR, R0
+
+LOOP            BL LOOP                         ;beskonacna petlja
+
+GPIO            DW 0xFFFF0B00                   ;adresa GPIO sklopa
+RTC             DW 0xFFFF0E00                   ;adresa RTC sklopa
+
+STANJE          DW 0                            ;stanje semafora
+
+KONST           DW 5                            ;konstanta cekanja za RTC od 5 sekundi s pretpostavkom f = 1 Hz

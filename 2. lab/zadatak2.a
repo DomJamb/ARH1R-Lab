@@ -1,0 +1,103 @@
+                ORG 0
+                B GLAVNI                ;obradivanje iznimke RESET
+
+                ORG 0x18
+                B PREKID                ;obradivanje iznimke IRQ
+
+                ORG 0x1C                ;obradivanje iznimke FIQ
+FIQ             LDR R9, RTC             ;ucitavanje adrese RTC sklopa
+
+                MOV R10, #0
+                STR R10, [R9, #8]       ;brisanje statusa
+                STR R10, [R9, #12]      ;reinicijalizacija LR RTC-a
+                STR R10, [R9, #16]      ;onemogucavanje slanja prekida RTC-a
+
+                LDR R9, DMAC            ;ucitavanje adrese DMAC-a
+                MOV R10, #0x500         ;adresa bloka podataka
+                STR R10, [R9, #16]      ;pohrana adrese bloka podataka u DMAC SrcAdr
+
+                MOV R10, #0x700         ;adresa za pohranu podataka
+                STR R10, [R9, #20]      ;pohrana adrese za pohranu podataka u DMAC DestAdr
+                
+                MOV R10, #1             ;ponovno pokretanje DMAC
+                STR R10, [R9, #0]
+
+                SUBS PC, LR, #4         ;povratak iz obradivanja prekida  
+
+
+PREKID          STMFD SP!, {R0, R1}     ;pohrana konteksta
+                LDR R0, DMAC            ;ucitavanje adrese DMAC-a
+                STR R0, [R0, #4]        ;prihvat prekida
+                
+                MOV R0, #0x700          ;adresa za pohraniti podatak za zakljucavanje bloka
+                ORR R0, R0, #0x28
+                LDR R1, PODATAK         ;ucitavanje podatka za zakljucavanje bloka
+                STR R1, [R0]            ;pohrana podatka za zakljucavanje bloka na odgovarajucu adresu
+
+                LDR R0, COUNTER         ;ucitavanje trenutnog stanja petlje (brojaca)
+                SUBS R0, R0, #1         ;smanjivanje brojaca
+                BEQ KRAJ                ;ako je broja dosao do 0, skociti na kraj izvodenja programa
+                STR R0, COUNTER         ;inace pohrana smanjenog brojaca
+
+                LDR R0, RTC             ;ucitavanje adrese RTC sklopa
+                MOV R1, #0
+                STR R1, [R0, #8]        ;brisanje statusa
+                STR R1, [R0, #12]       ;reinicijalizacija LR RTC-a
+                MOV R1, #1
+                STR R1, [R0, #16]       ;omogucavanje slanja prekida RTC-a                
+
+                LDMFD SP!, {R0, R1}     ;obnova konteksta
+                SUBS PC, LR, #4         ;povratak iz obradivanja prekida
+
+KRAJ            LDMFD SP!, {R0, R1}     ;obnova konteksta
+                SWI 0x123456            ;kraj izvodenja
+
+GLAVNI          MSR CPSR, #0b11010010   ;prelazak u nacin rada IRQ
+                MOV SP, #0x10000        ;inicijalizacija R13_irq
+
+                MSR CPSR, #0b11010011   ;prelazak u nacin rada SVC
+                MOV SP, #0xFC00         ;inicijalizacija R13_svc
+
+DMAC_IN         LDR R0, DMAC            ;ucitavanje adrese DMAC-a
+                MOV R1, #0x500          ;adresa bloka podataka
+                STR R1, [R0, #16]       ;pohrana adrese bloka podataka u DMAC SrcAdr
+
+                MOV R1, #0x700          ;adresa za pohranu podataka
+                STR R1, [R0, #20]       ;pohrana adrese za pohranu podataka u DMAC DestAdr
+                
+                MOV R1, #0x000A         ;burst size = 1 = 2^0, transfer size = 0x00A    
+                STR R1, [R0, #24]       ;pohrana B i T
+
+                MOV R1, #0b10101100     ;konfiguracijska rijec - IE = 1, DRE = 0, TW = 10, SI = 1, DI = 1, DRI = 00
+                STR R1, [R0, #28]       ;pohrana konfiguracijske rijeci
+
+RTC_IN          LDR R2, RTC             ;ucitavanje adrese RTC-a
+                LDR R3, KONST           ;ucitavanje konstante cekanja
+                STR R3, [R2, #4]        ;pohrana konstante u MR RTC-a
+
+                MOV R3, #0             
+                STR R3, [R2, #12]       ;inicijalizacija LR RTC-a na 0
+                STR R3, [R2, #16]       ;onemogucavanje slanja prekida RTC-a (nije potrebno - po defaultu 0)                         
+
+                MRS R4, CPSR
+                BIC R4, R4, #0x0C0      ;omogucavanje prekida FIQ te IRQ
+                MSR CPSR, R4
+
+                MOV R1, #1              ;pokretanje DMAC
+                STR R1, [R0, #0]
+
+LOOP            BL LOOP                 ;prazna petlja
+
+DMAC            DW 0x00FF0000           ;adresa DMAC-a
+RTC             DW 0xFFFF0E00           ;adresa RTC sklopa
+
+KONST           DW 3                    ;konstanta cekanja za RTC od 3 sekundi s pretpostavkom f = 1 Hz
+COUNTER         DW 5                    ;brojac
+
+PODATAK         DW 0x80808080           ;podatak za zakljucivanje bloka
+
+                ORG 0x500
+                DW 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA
+
+                ORG 0x700
+                DS 44
